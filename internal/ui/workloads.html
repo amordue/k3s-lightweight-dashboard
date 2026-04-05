@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>k3s Workload Explorer</title>
+    <style>
+      :root {
+        --bg: #f6f1e7;
+        --panel: rgba(255, 252, 244, 0.86);
+        --panel-strong: rgba(255, 252, 244, 0.96);
+        --line: rgba(64, 48, 26, 0.12);
+        --text: #2f2516;
+        --muted: #7a6850;
+        --accent: #0c7a6d;
+        --shadow: 0 18px 60px rgba(58, 41, 19, 0.12);
+        --radius: 22px;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Avenir Next", "Segoe UI", "Noto Sans", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(12, 122, 109, 0.18), transparent 26%),
+          radial-gradient(circle at right 20%, rgba(180, 90, 47, 0.14), transparent 22%),
+          linear-gradient(180deg, #f8f4ec 0%, #f3ecdd 100%);
+      }
+
+      .shell { width: min(1480px, calc(100vw - 32px)); margin: 24px auto; display: grid; gap: 20px; }
+      .hero, .panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); backdrop-filter: blur(12px); box-shadow: var(--shadow); }
+      .hero { padding: 28px; display: grid; gap: 16px; }
+      .hero h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.1rem); line-height: 0.96; letter-spacing: -0.05em; }
+      .hero-meta, .legend { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); }
+      .tag { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; background: var(--panel-strong); border: 1px solid var(--line); color: inherit; text-decoration: none; font-size: 0.92rem; }
+      .layout { display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
+      .panel { padding: 22px; }
+      .panel h2, .panel h3 { margin: 0; }
+      .controls { display: grid; gap: 16px; }
+      label { display: grid; gap: 8px; font-size: 0.92rem; color: var(--muted); }
+      input[type="search"], select {
+        width: 100%; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-strong); font: inherit; color: var(--text);
+      }
+      .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+      button {
+        appearance: none; border: 1px solid var(--line); background: var(--panel-strong); color: var(--text); border-radius: 999px; padding: 10px 14px; cursor: pointer; font: inherit;
+      }
+      button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+      .workload-list { max-height: 620px; overflow: auto; display: grid; gap: 10px; }
+      .workload-option { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel-strong); }
+      .workload-option small { color: var(--muted); display: block; margin-top: 4px; }
+      .charts { display: grid; gap: 20px; }
+      .chart-card { border: 1px solid var(--line); border-radius: 18px; background: var(--panel-strong); padding: 16px; }
+      .panel-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+      .status { color: var(--muted); font-size: 0.92rem; }
+      svg { width: 100%; height: 320px; display: block; }
+      .axis-label { fill: var(--muted); font-size: 0.78rem; }
+      .grid-line { stroke: rgba(64, 48, 26, 0.14); stroke-width: 1; }
+      .legend-item { display: inline-flex; align-items: center; gap: 8px; }
+      .swatch { width: 12px; height: 12px; border-radius: 999px; }
+      .empty { color: var(--muted); padding: 14px 0; }
+      @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <h1>Workload Explorer</h1>
+          <div class="hero-meta">
+            <span class="tag">Compare selected workloads</span>
+            <span class="tag">Choose the history window</span>
+            <a class="tag" href="/">Back to dashboard</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <aside class="panel controls">
+          <h2>Selection</h2>
+          <label>
+            Search workloads
+            <input id="search" type="search" placeholder="namespace, kind, or workload name">
+          </label>
+          <label>
+            Time window
+            <select id="window-select">
+              <option value="1h">Last hour</option>
+              <option value="6h">Last 6 hours</option>
+              <option value="24h" selected>Last 24 hours</option>
+              <option value="168h">Last 7 days</option>
+              <option value="720h">Last 30 days</option>
+            </select>
+          </label>
+          <div class="toolbar">
+            <button id="select-top" type="button">Select top 5 CPU</button>
+            <button id="clear-selection" type="button">Clear</button>
+            <button id="apply-selection" class="primary" type="button">Update charts</button>
+          </div>
+          <div id="selection-summary" class="status">Loading workloads…</div>
+          <div id="workload-list" class="workload-list"></div>
+        </aside>
+
+        <section class="panel charts">
+          <div class="panel-header">
+            <div>
+              <h2>Selected workload history</h2>
+              <div id="latest-scrape" class="status">Waiting for data</div>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="panel-header">
+              <h3>CPU</h3>
+              <div id="cpu-status" class="status">No data yet</div>
+            </div>
+            <div id="cpu-legend" class="legend"></div>
+            <svg id="cpu-chart" viewBox="0 0 900 320" preserveAspectRatio="none">
+              <g id="cpu-grid"></g>
+              <g id="cpu-lines"></g>
+              <g id="cpu-axis-y"></g>
+              <g id="cpu-axis-x"></g>
+            </svg>
+            <div id="cpu-empty" class="empty">Select workloads to render CPU history.</div>
+          </div>
+
+          <div class="chart-card">
+            <div class="panel-header">
+              <h3>Memory</h3>
+              <div id="memory-status" class="status">No data yet</div>
+            </div>
+            <div id="memory-legend" class="legend"></div>
+            <svg id="memory-chart" viewBox="0 0 900 320" preserveAspectRatio="none">
+              <g id="memory-grid"></g>
+              <g id="memory-lines"></g>
+              <g id="memory-axis-y"></g>
+              <g id="memory-axis-x"></g>
+            </svg>
+            <div id="memory-empty" class="empty">Select workloads to render memory history.</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const palette = ['#0c7a6d', '#b45a2f', '#2b5f8d', '#7a4de8', '#d1495b', '#5d7c1f', '#9e4b85', '#1d8aa8'];
+      const state = { workloads: [], selectedKeys: new Set(), comparison: null };
+
+      async function fetchJSON(path, options = {}) {
+        const response = await fetch(path, { headers: { Accept: 'application/json', ...(options.headers || {}) }, ...options });
+        const payload = await response.json().catch(() => ({ error: response.statusText }));
+        if (!response.ok) {
+          throw new Error(payload.error || response.statusText);
+        }
+        return payload;
+      }
+
+      function workloadKey(workload) {
+        return `${workload.namespace}::${workload.workloadKind}::${workload.workloadName}`;
+      }
+
+      function formatCPU(value) {
+        return `${value.toLocaleString()} m`;
+      }
+
+      function formatMemory(bytes) {
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let size = bytes;
+        let unit = 0;
+        while (size >= 1024 && unit < units.length - 1) {
+          size /= 1024;
+          unit += 1;
+        }
+        return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      function formatShortWhen(value) {
+        return new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      }
+
+      function filteredWorkloads() {
+        const term = document.getElementById('search').value.trim().toLowerCase();
+        if (!term) {
+          return state.workloads;
+        }
+
+        return state.workloads.filter((workload) => workloadKey(workload).toLowerCase().includes(term));
+      }
+
+      function renderWorkloadList() {
+        const list = document.getElementById('workload-list');
+        const workloads = filteredWorkloads();
+        const selectedCount = state.selectedKeys.size;
+        document.getElementById('selection-summary').textContent = `${selectedCount} selected · ${workloads.length} shown`;
+
+        if (!workloads.length) {
+          list.innerHTML = '<div class="empty">No workloads match this filter.</div>';
+          return;
+        }
+
+        list.innerHTML = workloads.map((workload) => {
+          const key = workloadKey(workload);
+          return `
+            <label class="workload-option">
+              <input type="checkbox" data-key="${key}" ${state.selectedKeys.has(key) ? 'checked' : ''}>
+              <div>
+                <strong>${workload.namespace}/${workload.workloadKind}/${workload.workloadName}</strong>
+                <small>${formatCPU(workload.cpuMilli)} · ${formatMemory(workload.memoryBytes)} · ${workload.podCount} pods</small>
+              </div>
+            </label>
+          `;
+        }).join('');
+      }
+
+      function renderLegend(targetId, series) {
+        const target = document.getElementById(targetId);
+        target.innerHTML = series.map((item, index) => `
+          <div class="legend-item">
+            <span class="swatch" style="background:${palette[index % palette.length]}"></span>
+            ${item.namespace}/${item.workloadKind}/${item.workloadName}
+          </div>
+        `).join('');
+      }
+
+      function drawSeriesChart(prefix, series, valueKey, formatter) {
+        const grid = document.getElementById(`${prefix}-grid`);
+        const lines = document.getElementById(`${prefix}-lines`);
+        const axisY = document.getElementById(`${prefix}-axis-y`);
+        const axisX = document.getElementById(`${prefix}-axis-x`);
+        const empty = document.getElementById(`${prefix}-empty`);
+        const status = document.getElementById(`${prefix}-status`);
+
+        const active = series.filter((item) => item.history.length >= 2);
+        if (!active.length) {
+          grid.innerHTML = '';
+          lines.innerHTML = '';
+          axisY.innerHTML = '';
+          axisX.innerHTML = '';
+          empty.style.display = 'block';
+          status.textContent = 'Not enough historical points yet';
+          return;
+        }
+
+        empty.style.display = 'none';
+        status.textContent = `${active.length} workloads plotted`;
+
+        const width = 900;
+        const height = 320;
+        const left = 58;
+        const right = 22;
+        const top = 18;
+        const bottom = 30;
+        const maxValue = Math.max(...active.flatMap((item) => item.history.map((point) => point[valueKey])), 1);
+        const longest = Math.max(...active.map((item) => item.history.length));
+
+        const gridMarkup = [];
+        const yMarkup = [];
+        const tickCount = 4;
+        for (let index = 0; index <= tickCount; index += 1) {
+          const ratio = index / tickCount;
+          const y = top + (height - top - bottom) * ratio;
+          const value = maxValue * (1 - ratio);
+          gridMarkup.push(`<line class="grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>`);
+          yMarkup.push(`<text class="axis-label" x="8" y="${y + 4}">${formatter(value)}</text>`);
+        }
+
+        const lineMarkup = active.map((item, seriesIndex) => {
+          const path = item.history.map((point, pointIndex) => {
+            const x = left + ((width - left - right) * pointIndex) / Math.max(item.history.length - 1, 1);
+            const y = height - bottom - ((height - top - bottom) * point[valueKey]) / maxValue;
+            return `${pointIndex === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+          }).join(' ');
+          return `<path d="${path}" fill="none" stroke="${palette[seriesIndex % palette.length]}" stroke-width="3" stroke-linecap="round"></path>`;
+        });
+
+        const xIndices = [0, Math.floor((longest - 1) / 2), longest - 1].filter((value, index, array) => array.indexOf(value) === index);
+        const baseHistory = active.reduce((best, current) => current.history.length > best.history.length ? current : best, active[0]).history;
+        const xMarkup = xIndices.map((pointIndex) => {
+          const x = left + ((width - left - right) * pointIndex) / Math.max(longest - 1, 1);
+          const point = baseHistory[Math.min(pointIndex, baseHistory.length - 1)];
+          return `<text class="axis-label" text-anchor="middle" x="${x}" y="${height - 8}">${formatShortWhen(point.timestamp)}</text>`;
+        });
+
+        grid.innerHTML = gridMarkup.join('');
+        axisY.innerHTML = yMarkup.join('');
+        axisX.innerHTML = xMarkup.join('');
+        lines.innerHTML = lineMarkup.join('');
+      }
+
+      async function loadWorkloads() {
+        const payload = await fetchJSON('/api/v1/workloads');
+        state.workloads = payload.workloads || [];
+        if (!state.selectedKeys.size) {
+          state.workloads.slice().sort((a, b) => b.cpuMilli - a.cpuMilli).slice(0, 5).forEach((workload) => state.selectedKeys.add(workloadKey(workload)));
+        }
+        renderWorkloadList();
+      }
+
+      async function loadCharts() {
+        const selected = state.workloads.filter((item) => state.selectedKeys.has(workloadKey(item)));
+        if (!selected.length) {
+          state.comparison = null;
+          drawSeriesChart('cpu', [], 'cpuMilli', formatCPU);
+          drawSeriesChart('memory', [], 'memoryBytes', formatMemory);
+          renderLegend('cpu-legend', []);
+          renderLegend('memory-legend', []);
+          document.getElementById('latest-scrape').textContent = 'No workloads selected';
+          return;
+        }
+
+        const window = document.getElementById('window-select').value;
+        state.comparison = await fetchJSON('/api/v1/workload-history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ window, workloads: selected.map((item) => ({
+            namespace: item.namespace,
+            workloadKind: item.workloadKind,
+            workloadName: item.workloadName,
+          })) }),
+        });
+
+        document.getElementById('latest-scrape').textContent = `Latest scrape ${formatShortWhen(state.comparison.latestScrape)} · window ${state.comparison.window}`;
+        renderLegend('cpu-legend', state.comparison.series);
+        renderLegend('memory-legend', state.comparison.series);
+        drawSeriesChart('cpu', state.comparison.series, 'cpuMilli', formatCPU);
+        drawSeriesChart('memory', state.comparison.series, 'memoryBytes', formatMemory);
+      }
+
+      document.getElementById('search').addEventListener('input', renderWorkloadList);
+      document.getElementById('window-select').addEventListener('change', () => loadCharts().catch(reportError));
+      document.getElementById('select-top').addEventListener('click', () => {
+        state.selectedKeys = new Set(state.workloads.slice().sort((a, b) => b.cpuMilli - a.cpuMilli).slice(0, 5).map(workloadKey));
+        renderWorkloadList();
+        loadCharts().catch(reportError);
+      });
+      document.getElementById('clear-selection').addEventListener('click', () => {
+        state.selectedKeys.clear();
+        renderWorkloadList();
+        loadCharts().catch(reportError);
+      });
+      document.getElementById('apply-selection').addEventListener('click', () => loadCharts().catch(reportError));
+      document.getElementById('workload-list').addEventListener('change', (event) => {
+        const checkbox = event.target.closest('input[type="checkbox"]');
+        if (!checkbox) {
+          return;
+        }
+
+        if (checkbox.checked) {
+          state.selectedKeys.add(checkbox.dataset.key);
+        } else {
+          state.selectedKeys.delete(checkbox.dataset.key);
+        }
+        renderWorkloadList();
+      });
+
+      function reportError(error) {
+        document.getElementById('latest-scrape').textContent = error.message;
+      }
+
+      loadWorkloads().then(loadCharts).catch(reportError);
+    </script>
+  </body>
+</html>

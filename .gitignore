@@ -1,0 +1,6 @@
+/bin/
+/dist/
+/data/
+/metrics.db
+/server
+/run-data/

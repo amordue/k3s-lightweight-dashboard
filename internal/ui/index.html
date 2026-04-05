@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>k3s Workload Monitor</title>
+    <style>
+      :root {
+        --bg: #f6f1e7;
+        --panel: rgba(255, 252, 244, 0.84);
+        --panel-strong: rgba(255, 252, 244, 0.96);
+        --line: rgba(64, 48, 26, 0.12);
+        --text: #2f2516;
+        --muted: #7a6850;
+        --accent: #0c7a6d;
+        --accent-soft: rgba(12, 122, 109, 0.1);
+        --cpu: #b45a2f;
+        --memory: #2b5f8d;
+        --shadow: 0 18px 60px rgba(58, 41, 19, 0.12);
+        --radius: 22px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Avenir Next", "Segoe UI", "Noto Sans", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(12, 122, 109, 0.18), transparent 26%),
+          radial-gradient(circle at right 20%, rgba(180, 90, 47, 0.14), transparent 22%),
+          linear-gradient(180deg, #f8f4ec 0%, #f3ecdd 100%);
+      }
+
+      .shell {
+        width: min(1400px, calc(100vw - 32px));
+        margin: 24px auto;
+        display: grid;
+        gap: 20px;
+      }
+
+      .hero,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+        box-shadow: var(--shadow);
+      }
+
+      .hero {
+        padding: 28px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-size: clamp(2rem, 5vw, 3.3rem);
+        line-height: 0.95;
+        letter-spacing: -0.05em;
+      }
+
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        color: var(--muted);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+        font-size: 0.92rem;
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .tag.link:hover {
+        border-color: rgba(12, 122, 109, 0.35);
+      }
+
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+      }
+
+      .kpi {
+        padding: 18px;
+        border-radius: 18px;
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+      }
+
+      .kpi-label {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .kpi-value {
+        margin-top: 10px;
+        font-size: 1.8rem;
+        font-weight: 700;
+        letter-spacing: -0.04em;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: 20px;
+      }
+
+      .panel {
+        padding: 22px;
+      }
+
+      .panel h2,
+      .panel h3 {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .grid-two {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 20px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 12px 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.95rem;
+      }
+
+      th {
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      td.numeric {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .table-wrap {
+        max-height: 440px;
+        overflow: auto;
+      }
+
+      button.linkish {
+        appearance: none;
+        border: none;
+        padding: 0;
+        background: none;
+        font: inherit;
+        color: var(--accent);
+        cursor: pointer;
+        text-align: left;
+      }
+
+      button.linkish:hover {
+        text-decoration: underline;
+      }
+
+      .history {
+        border-radius: 18px;
+        padding: 12px;
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+      }
+
+      svg {
+        width: 100%;
+        height: 240px;
+        display: block;
+      }
+
+      .axis-label {
+        fill: var(--muted);
+        font-size: 0.76rem;
+      }
+
+      .grid-line {
+        stroke: rgba(64, 48, 26, 0.14);
+        stroke-width: 1;
+      }
+
+      .legend {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+      }
+
+      .detail-title {
+        font-size: 1.4rem;
+        letter-spacing: -0.03em;
+      }
+
+      .empty {
+        color: var(--muted);
+        padding: 10px 0;
+      }
+
+      .status-badge {
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 0.84rem;
+        font-weight: 700;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .status-badge.error {
+        color: #8d3d26;
+        background: rgba(180, 90, 47, 0.12);
+      }
+
+      @media (max-width: 980px) {
+        .layout,
+        .grid-two {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <h1>k3s Workload Monitor</h1>
+          <div class="hero-meta">
+            <span class="tag">CPU and memory visibility for every workload</span>
+            <span class="tag">SQLite-backed history</span>
+            <span class="tag">Designed for a single private k3s cluster</span>
+            <a class="tag link" href="/workloads">Open workload explorer</a>
+          </div>
+        </div>
+        <div class="kpis">
+          <div class="kpi">
+            <div class="kpi-label">Last scrape</div>
+            <div class="kpi-value" id="kpi-last-scrape">Waiting</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Cluster CPU</div>
+            <div class="kpi-value" id="kpi-cpu">0 m</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Cluster memory</div>
+            <div class="kpi-value" id="kpi-memory">0 MiB</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Tracked pods</div>
+            <div class="kpi-value" id="kpi-pods">0</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Namespaces</h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Namespace</th>
+                    <th class="numeric">CPU</th>
+                    <th class="numeric">Memory</th>
+                    <th class="numeric">Workloads</th>
+                    <th class="numeric">Pods</th>
+                  </tr>
+                </thead>
+                <tbody id="namespaces-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="grid-two">
+            <section class="panel">
+              <div class="panel-header">
+                <h2>Workloads</h2>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Workload</th>
+                      <th class="numeric">CPU</th>
+                      <th class="numeric">Memory</th>
+                      <th class="numeric">Pods</th>
+                    </tr>
+                  </thead>
+                  <tbody id="workloads-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <h2>Pods</h2>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Pod</th>
+                      <th>Workload</th>
+                      <th class="numeric">CPU</th>
+                      <th class="numeric">Memory</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pods-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="detail-title" id="detail-title">Cluster detail</div>
+              <div id="detail-subtitle" class="empty">Select a namespace, workload, or pod to drill into history.</div>
+            </div>
+            <div id="collector-status" class="status-badge">Checking</div>
+          </div>
+
+          <div class="kpis" style="margin-bottom: 18px;">
+            <div class="kpi">
+              <div class="kpi-label">Current CPU</div>
+              <div class="kpi-value" id="detail-cpu">0 m</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Current memory</div>
+              <div class="kpi-value" id="detail-memory">0 MiB</div>
+            </div>
+          </div>
+
+          <div class="history">
+            <div class="legend" style="margin-bottom: 12px;">
+              <div class="legend-item"><span class="swatch" style="background: var(--cpu);"></span>CPU</div>
+              <div class="legend-item"><span class="swatch" style="background: var(--memory);"></span>Memory</div>
+            </div>
+            <svg id="history-chart" viewBox="0 0 640 240" preserveAspectRatio="none">
+              <g id="history-grid"></g>
+              <path id="cpu-path" fill="none" stroke="var(--cpu)" stroke-width="3" stroke-linecap="round"></path>
+              <path id="memory-path" fill="none" stroke="var(--memory)" stroke-width="3" stroke-linecap="round"></path>
+              <g id="history-left-axis"></g>
+              <g id="history-right-axis"></g>
+              <g id="history-x-axis"></g>
+            </svg>
+            <div id="history-empty" class="empty">History will appear after at least two scrapes.</div>
+          </div>
+
+          <section style="margin-top: 18px;">
+            <h3 style="margin-bottom: 14px;">Current members</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Node</th>
+                    <th class="numeric">CPU</th>
+                    <th class="numeric">Memory</th>
+                  </tr>
+                </thead>
+                <tbody id="detail-members"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        selected: { type: 'cluster' },
+      };
+
+      async function fetchJSON(path) {
+        const response = await fetch(path, { headers: { Accept: 'application/json' } });
+        const payload = await response.json().catch(() => ({ error: response.statusText }));
+        if (!response.ok) {
+          const error = new Error(payload.error || response.statusText);
+          error.payload = payload;
+          throw error;
+        }
+
+        return payload;
+      }
+
+      function formatCPU(value) {
+        return `${value.toLocaleString()} m`;
+      }
+
+      function formatMemory(bytes) {
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let size = bytes;
+        let unit = 0;
+        while (size >= 1024 && unit < units.length - 1) {
+          size /= 1024;
+          unit += 1;
+        }
+        return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      function formatWhen(value) {
+        if (!value) {
+          return 'Waiting';
+        }
+        return new Date(value).toLocaleString();
+      }
+
+      function formatShortWhen(value) {
+        return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      function formatCompactCPU(value) {
+        return `${Math.round(value)} m`;
+      }
+
+      function renderRows(targetId, rows, mapper, emptyMessage) {
+        const target = document.getElementById(targetId);
+        target.innerHTML = '';
+        if (!rows.length) {
+          target.innerHTML = `<tr><td colspan="5" class="empty">${emptyMessage}</td></tr>`;
+          return;
+        }
+
+        for (const row of rows) {
+          target.insertAdjacentHTML('beforeend', mapper(row));
+        }
+      }
+
+      function renderSummary(summary) {
+        document.getElementById('kpi-last-scrape').textContent = formatWhen(summary.latestScrape);
+        document.getElementById('kpi-cpu').textContent = formatCPU(summary.totals.cpuMilli);
+        document.getElementById('kpi-memory').textContent = formatMemory(summary.totals.memoryBytes);
+        document.getElementById('kpi-pods').textContent = summary.pods.length.toLocaleString();
+
+        renderRows('namespaces-body', summary.namespaces, (item) => `
+          <tr>
+            <td><button class="linkish" data-kind="namespace" data-namespace="${encodeURIComponent(item.namespace)}">${item.namespace}</button></td>
+            <td class="numeric">${formatCPU(item.cpuMilli)}</td>
+            <td class="numeric">${formatMemory(item.memoryBytes)}</td>
+            <td class="numeric">${item.workloadCount}</td>
+            <td class="numeric">${item.podCount}</td>
+          </tr>
+        `, 'No namespace data yet.');
+
+        renderRows('workloads-body', summary.workloads.slice(0, 30), (item) => `
+          <tr>
+            <td>
+              <button
+                class="linkish"
+                data-kind="workload"
+                data-namespace="${encodeURIComponent(item.namespace)}"
+                data-workload-kind="${encodeURIComponent(item.workloadKind)}"
+                data-workload-name="${encodeURIComponent(item.workloadName)}"
+              >${item.namespace}/${item.workloadKind}/${item.workloadName}</button>
+            </td>
+            <td class="numeric">${formatCPU(item.cpuMilli)}</td>
+            <td class="numeric">${formatMemory(item.memoryBytes)}</td>
+            <td class="numeric">${item.podCount}</td>
+          </tr>
+        `, 'No workload data yet.');
+
+        renderRows('pods-body', summary.pods.slice(0, 40), (item) => `
+          <tr>
+            <td><button class="linkish" data-kind="pod" data-namespace="${encodeURIComponent(item.namespace)}" data-pod-name="${encodeURIComponent(item.podName)}">${item.namespace}/${item.podName}</button></td>
+            <td>${item.workloadKind}/${item.workloadName}</td>
+            <td class="numeric">${formatCPU(item.cpuMilli)}</td>
+            <td class="numeric">${formatMemory(item.memoryBytes)}</td>
+          </tr>
+        `, 'No pod data yet.');
+      }
+
+      function renderCollectorStatus(status) {
+        const badge = document.getElementById('collector-status');
+        badge.classList.toggle('error', !status.ready);
+        badge.textContent = status.ready ? `Ready · ${formatWhen(status.lastSuccess)}` : `Waiting · ${status.lastError || 'First scrape pending'}`;
+      }
+
+      function renderDetail(title, subtitle, totals, members, history) {
+        document.getElementById('detail-title').textContent = title;
+        document.getElementById('detail-subtitle').textContent = subtitle;
+        document.getElementById('detail-cpu').textContent = formatCPU(totals.cpuMilli);
+        document.getElementById('detail-memory').textContent = formatMemory(totals.memoryBytes);
+
+        renderRows('detail-members', members, (item) => `
+          <tr>
+            <td>${item.name}</td>
+            <td>${item.nodeName || '—'}</td>
+            <td class="numeric">${formatCPU(item.cpuMilli)}</td>
+            <td class="numeric">${formatMemory(item.memoryBytes)}</td>
+          </tr>
+        `, 'Nothing selected.');
+
+        renderHistory(history);
+      }
+
+      function renderHistory(points) {
+        const cpuPath = document.getElementById('cpu-path');
+        const memoryPath = document.getElementById('memory-path');
+        const grid = document.getElementById('history-grid');
+        const leftAxis = document.getElementById('history-left-axis');
+        const rightAxis = document.getElementById('history-right-axis');
+        const xAxis = document.getElementById('history-x-axis');
+        const empty = document.getElementById('history-empty');
+
+        if (!points || points.length < 2) {
+          cpuPath.setAttribute('d', '');
+          memoryPath.setAttribute('d', '');
+          grid.innerHTML = '';
+          leftAxis.innerHTML = '';
+          rightAxis.innerHTML = '';
+          xAxis.innerHTML = '';
+          empty.style.display = 'block';
+          return;
+        }
+
+        empty.style.display = 'none';
+
+        const width = 640;
+        const height = 240;
+        const leftPadding = 58;
+        const rightPadding = 58;
+        const topPadding = 18;
+        const bottomPadding = 28;
+        const maxCPU = Math.max(...points.map((point) => point.cpuMilli), 1);
+        const maxMemory = Math.max(...points.map((point) => point.memoryBytes), 1);
+
+        const cpuSegments = [];
+        const memorySegments = [];
+
+        points.forEach((point, index) => {
+          const x = leftPadding + ((width - leftPadding - rightPadding) * index) / (points.length - 1);
+          const cpuY = height - bottomPadding - ((height - topPadding - bottomPadding) * point.cpuMilli) / maxCPU;
+          const memoryY = height - bottomPadding - ((height - topPadding - bottomPadding) * point.memoryBytes) / maxMemory;
+          cpuSegments.push(`${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${cpuY.toFixed(2)}`);
+          memorySegments.push(`${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${memoryY.toFixed(2)}`);
+        });
+
+        cpuPath.setAttribute('d', cpuSegments.join(' '));
+        memoryPath.setAttribute('d', memorySegments.join(' '));
+
+        const tickCount = 4;
+        const gridMarkup = [];
+        const leftMarkup = [];
+        const rightMarkup = [];
+
+        for (let index = 0; index <= tickCount; index += 1) {
+          const ratio = index / tickCount;
+          const y = topPadding + (height - topPadding - bottomPadding) * ratio;
+          const cpuValue = maxCPU * (1 - ratio);
+          const memoryValue = maxMemory * (1 - ratio);
+          gridMarkup.push(`<line class="grid-line" x1="${leftPadding}" y1="${y}" x2="${width - rightPadding}" y2="${y}"></line>`);
+          leftMarkup.push(`<text class="axis-label" x="10" y="${y + 4}">${formatCompactCPU(cpuValue)}</text>`);
+          rightMarkup.push(`<text class="axis-label" text-anchor="end" x="630" y="${y + 4}">${formatMemory(memoryValue)}</text>`);
+        }
+
+        const xLabels = [0, Math.floor((points.length - 1) / 2), points.length - 1]
+          .filter((value, index, array) => array.indexOf(value) === index)
+          .map((pointIndex) => {
+            const x = leftPadding + ((width - leftPadding - rightPadding) * pointIndex) / Math.max(points.length - 1, 1);
+            return `<text class="axis-label" text-anchor="middle" x="${x}" y="${height - 6}">${formatShortWhen(points[pointIndex].timestamp)}</text>`;
+          });
+
+        xLabels.unshift(`<text class="axis-label" x="10" y="14">CPU</text>`);
+        xLabels.push(`<text class="axis-label" text-anchor="end" x="630" y="14">Memory</text>`);
+
+        grid.innerHTML = gridMarkup.join('');
+        leftAxis.innerHTML = leftMarkup.join('');
+        rightAxis.innerHTML = rightMarkup.join('');
+        xAxis.innerHTML = xLabels.join('');
+      }
+
+      async function loadDetail() {
+        if (state.selected.type === 'cluster') {
+          const [summary, clusterHistory] = await Promise.all([
+            fetchJSON('/api/v1/summary'),
+            fetchJSON('/api/v1/cluster-history?window=168h'),
+          ]);
+          renderDetail(
+            'Cluster detail',
+            `Latest scrape ${formatWhen(summary.latestScrape)}`,
+            summary.totals,
+            summary.workloads.slice(0, 20).map((item) => ({
+              name: `${item.namespace}/${item.workloadKind}/${item.workloadName}`,
+              nodeName: `${item.podCount} pods`,
+              cpuMilli: item.cpuMilli,
+              memoryBytes: item.memoryBytes,
+            })),
+            clusterHistory.history
+          );
+          return;
+        }
+
+        if (state.selected.type === 'namespace') {
+          const namespace = state.selected.namespace;
+          const detail = await fetchJSON(`/api/v1/namespaces/${namespace}?window=168h`);
+          renderDetail(
+            `Namespace · ${detail.namespace}`,
+            `${detail.workloads.length} workloads · ${detail.pods.length} pods`,
+            detail.totals,
+            detail.workloads.map((item) => ({
+              name: `${item.workloadKind}/${item.workloadName}`,
+              nodeName: `${item.podCount} pods`,
+              cpuMilli: item.cpuMilli,
+              memoryBytes: item.memoryBytes,
+            })),
+            detail.history
+          );
+          return;
+        }
+
+        if (state.selected.type === 'workload') {
+          const detail = await fetchJSON(`/api/v1/workloads/${state.selected.namespace}/${state.selected.workloadKind}/${state.selected.workloadName}?window=168h`);
+          renderDetail(
+            `${detail.namespace} · ${detail.workloadKind}/${detail.workloadName}`,
+            `${detail.pods.length} current pods`,
+            detail.totals,
+            detail.pods.map((item) => ({
+              name: item.podName,
+              nodeName: item.nodeName,
+              cpuMilli: item.cpuMilli,
+              memoryBytes: item.memoryBytes,
+            })),
+            detail.history
+          );
+          return;
+        }
+
+        if (state.selected.type === 'pod') {
+          const detail = await fetchJSON(`/api/v1/pods/${state.selected.namespace}/${state.selected.podName}?window=168h`);
+          renderDetail(
+            `${detail.namespace} · ${detail.podName}`,
+            `${detail.workloadKind}/${detail.workloadName} on ${detail.nodeName || 'unknown node'}`,
+            detail.totals,
+            [{
+              name: detail.podName,
+              nodeName: detail.nodeName,
+              cpuMilli: detail.totals.cpuMilli,
+              memoryBytes: detail.totals.memoryBytes,
+            }],
+            detail.history
+          );
+        }
+      }
+
+      async function loadStatus() {
+        try {
+          return await fetchJSON('/readyz');
+        } catch (error) {
+          if (error.payload) {
+            return error.payload;
+          }
+          throw error;
+        }
+      }
+
+      async function refresh() {
+        try {
+          const [summary, status] = await Promise.all([
+            fetchJSON('/api/v1/summary'),
+            loadStatus(),
+          ]);
+          renderSummary(summary);
+          renderCollectorStatus(status);
+          await loadDetail();
+        } catch (error) {
+          document.getElementById('collector-status').textContent = error.message;
+          document.getElementById('collector-status').classList.add('error');
+        }
+      }
+
+      document.body.addEventListener('click', (event) => {
+        const button = event.target.closest('button.linkish');
+        if (!button) {
+          return;
+        }
+
+        event.preventDefault();
+        const type = button.dataset.kind;
+
+        if (type === 'namespace') {
+          state.selected = { type, namespace: button.dataset.namespace };
+        } else if (type === 'workload') {
+          state.selected = {
+            type,
+            namespace: button.dataset.namespace,
+            workloadKind: button.dataset.workloadKind,
+            workloadName: button.dataset.workloadName,
+          };
+        } else if (type === 'pod') {
+          state.selected = {
+            type,
+            namespace: button.dataset.namespace,
+            podName: button.dataset.podName,
+          };
+        }
+
+        loadDetail().catch((error) => {
+          document.getElementById('detail-subtitle').textContent = error.message;
+        });
+      });
+
+      refresh();
+      setInterval(refresh, 15000);
+    </script>
+  </body>
+</html>
