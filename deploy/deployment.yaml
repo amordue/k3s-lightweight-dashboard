@@ -16,7 +16,7 @@ spec:
       serviceAccountName: k3s-dashboard
       containers:
         - name: app
-          image: ghcr.io/alexmordue/k3s-dashboard:latest
+          image: ghcr.io/amordue/k3s-lightweight-dashboard:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: LISTEN_ADDR

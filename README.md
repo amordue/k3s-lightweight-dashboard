@@ -93,7 +93,7 @@ This project uses the kubeconfig as provided by `client-go`, so local execution 
 ## Container build
 
 ```bash
-docker build -t ghcr.io/alexmordue/k3s-dashboard:latest .
+docker build -t ghcr.io/amordue/k3s-lightweight-dashboard:latest .
 ```
 
 ## Deploy to k3s
